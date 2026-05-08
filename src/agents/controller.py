@@ -84,25 +84,68 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
 
 
 @router.post("/vectors")
-async def insert_vectors(payload: dict, user: str = Depends(get_current_user)):
+async def insert_vectors(request: Request, user: str = Depends(get_current_user)):
     """Insert a list of case vectors into the DB. Payload should be {"cases": [ ... ]}.
 
+    Accepts JSON body, form-encoded body (with 'cases' as JSON string) or raw JSON text.
     Each case may include: id, title, description, solution, embedding (list of floats).
     """
-    cases = payload.get("cases") if isinstance(payload, dict) else None
+    content_type = request.headers.get("content-type", "")
+    data = None
+
+    if "application/json" in content_type:
+        try:
+            data = await request.json()
+        except Exception:
+            # fall through to try raw body
+            data = None
+    else:
+        # try form
+        form = await request.form()
+        if form:
+            # If 'cases' was sent as a JSON string in a form
+            if "cases" in form:
+                raw = form.get("cases")
+                try:
+                    data = {"cases": json.loads(raw)} if isinstance(raw, str) else {"cases": raw}
+                except Exception:
+                    # maybe it's already a list-like
+                    data = {"cases": raw}
+            else:
+                # coerce other fields if necessary
+                data = {k: form.get(k) for k in form.keys()}
+
+    if data is None:
+        # try reading raw body and parsing as json
+        try:
+            raw = (await request.body()).decode(errors="ignore").strip()
+            if raw:
+                data = json.loads(raw)
+        except Exception:
+            data = None
+
+    cases = data.get("cases") if isinstance(data, dict) else None
     if not cases or not isinstance(cases, list):
         from fastapi import HTTPException
 
         raise HTTPException(status_code=400, detail="Payload must include a 'cases' list")
 
-    # Normalize entries
+    # Normalize entries and validate required fields
     normalized = []
-    for c in cases:
+    for idx, c in enumerate(cases):
+        if not isinstance(c, dict):
+            raise HTTPException(status_code=400, detail=f"Each case must be an object/dict (index {idx})")
+        title = c.get("title")
+        description = c.get("description")
+        solution = c.get("solution")
+        if not title or not description:
+            raise HTTPException(status_code=400, detail=f"Each case must include 'title' and 'description' (index {idx})")
+
         normalized.append({
             "id": c.get("id"),
-            "title": c.get("title"),
-            "description": c.get("description"),
-            "solution": c.get("solution"),
+            "title": title,
+            "description": description,
+            "solution": solution,
             "embedding": c.get("embedding"),
         })
 

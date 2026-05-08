@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     OPENAI_TEMPERATURE: float = 0.2
     # Database
     DATABASE_URL: str | None = None
+    # If your case_vectors table lives in a schema (for example 'Agent'), set it here.
+    CASE_VECTOR_SCHEMA: str = "Agent"
 
 
 settings = Settings()
