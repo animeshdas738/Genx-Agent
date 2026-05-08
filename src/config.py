@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = 'gpt-3.5-turbo'
     OPENAI_TEMPERATURE: float = 0.2
+    # Database
+    DATABASE_URL: str | None = None
 
 
 settings = Settings()

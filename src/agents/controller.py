@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, Request
 from src.security import get_current_user
 from src.agents.tools import SummarizeTool
 from src.agents.models import CaseDetail, CaseSummary
+from src.vectordb import query_similar
+from src.vectordb import upsert_cases
 import json
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -57,4 +59,58 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
 
         raise HTTPException(status_code=400, detail="Missing required field: description")
 
+    # Before calling the LLM summarizer, check the vector DB for a probable stored solution.
+    try:
+        matches = query_similar(str(data.get("description") or ""), top_k=1)
+    except Exception:
+        matches = []
+
+    if matches:
+        # Use the top match and return it as a CaseSummary. The DB stores a solution and description.
+        m = matches[0]
+        summary_text = (m.get("description") or "")
+        if summary_text and len(summary_text) > 200:
+            summary_text = summary_text[:197] + "..."
+        suggested_solution = m.get("solution") or "Solution retrieved from vector DB"
+        # Return a high-confidence value for retrieved solutions
+        result = CaseSummary(summary=summary_text or (data.get("description")[:200] if data.get("description") else ""),
+                             suggested_solution=suggested_solution,
+                             confidence=0.95)
+        return result.model_dump()
+
+    # No vector DB match -> use LLM summarizer tool
     return tool.run(data)
+
+
+
+@router.post("/vectors")
+async def insert_vectors(payload: dict, user: str = Depends(get_current_user)):
+    """Insert a list of case vectors into the DB. Payload should be {"cases": [ ... ]}.
+
+    Each case may include: id, title, description, solution, embedding (list of floats).
+    """
+    cases = payload.get("cases") if isinstance(payload, dict) else None
+    if not cases or not isinstance(cases, list):
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail="Payload must include a 'cases' list")
+
+    # Normalize entries
+    normalized = []
+    for c in cases:
+        normalized.append({
+            "id": c.get("id"),
+            "title": c.get("title"),
+            "description": c.get("description"),
+            "solution": c.get("solution"),
+            "embedding": c.get("embedding"),
+        })
+
+    try:
+        upsert_cases(normalized)
+    except Exception as e:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"inserted": len(normalized)}
