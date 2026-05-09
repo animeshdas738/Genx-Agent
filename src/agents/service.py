@@ -22,7 +22,8 @@ def summarize_case(case: CaseDetail) -> CaseSummary:
             summary = str(data.get("summary", ""))
             suggested_solution = str(data.get("suggested_solution", ""))
             confidence = float(data.get("confidence", 0.0))
-            return CaseSummary(summary=summary, suggested_solution=suggested_solution, confidence=confidence)
+            tokens = data.get("tokens")
+            return CaseSummary(summary=summary, suggested_solution=suggested_solution, confidence=confidence, tokens=tokens)
         except Exception as e:
             print(f"LangChain summarization failed, falling back: {e}")
 
@@ -35,7 +36,8 @@ def summarize_case(case: CaseDetail) -> CaseSummary:
             summary = str(data.get("summary", ""))
             suggested_solution = str(data.get("suggested_solution", ""))
             confidence = float(data.get("confidence", 0.0))
-            return CaseSummary(summary=summary, suggested_solution=suggested_solution, confidence=confidence)
+            tokens = data.get("tokens")
+            return CaseSummary(summary=summary, suggested_solution=suggested_solution, confidence=confidence, tokens=tokens)
         except Exception as e:
             # fallback to heuristic summarizer on any LLM error
             print(f"OpenAI summarization failed, falling back: {e}")
@@ -44,4 +46,4 @@ def summarize_case(case: CaseDetail) -> CaseSummary:
     summary = desc if len(desc) <= 200 else desc[:197] + "..."
     solution = "Further investigation required. Recommend gathering missing evidence and consulting subject-matter expert."
     confidence = min(0.95, max(0.2, len(desc) / 2000))
-    return CaseSummary(summary=summary, suggested_solution=solution, confidence=round(confidence, 2))
+    return CaseSummary(summary=summary, suggested_solution=solution, confidence=round(confidence, 2), tokens=None)

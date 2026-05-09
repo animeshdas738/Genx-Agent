@@ -21,7 +21,7 @@ def call_langchain_for_summary(description: str, facts: Optional[list] = None) -
     if facts:
         content += "\n\nFacts:\n" + "\n".join(facts)
 
-    resp = client.generate([ [HumanMessage(content=content)] ])
+    resp = client.generate([[HumanMessage(content=content)]])
     text = resp.generations[0][0].text
 
     # Try to parse JSON out of text
@@ -34,4 +34,31 @@ def call_langchain_for_summary(description: str, facts: Optional[list] = None) -
         text = re.sub(r"^```(?:json)?\n", "", text)
         text = re.sub(r"\n```$", "", text)
 
-    return json.loads(text)
+    data = json.loads(text)
+
+    # Attempt to extract token usage from LangChain LLM output if present
+    tokens = None
+    try:
+        # LangChain may include token usage in llm_output or generation_info
+        llm_output = getattr(resp, "llm_output", None) or resp.generations[0][0].generation_info or {}
+        # common place: llm_output["token_usage"]["total_tokens"] or generation_info["token_usage"]
+        tu = None
+        if isinstance(llm_output, dict):
+            tu = llm_output.get("token_usage") or llm_output.get("token_count")
+        if tu and isinstance(tu, dict):
+            tokens = tu.get("total_tokens") or tu.get("total") or tu.get("tokens")
+        if tokens is None:
+            # try generation_info
+            gi = resp.generations[0][0].generation_info or {}
+            if isinstance(gi, dict):
+                tokens = gi.get("token_usage") or gi.get("tokens")
+    except Exception:
+        tokens = None
+
+    if tokens is not None:
+        try:
+            data["tokens"] = int(tokens)
+        except Exception:
+            data["tokens"] = None
+
+    return data

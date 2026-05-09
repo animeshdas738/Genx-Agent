@@ -68,15 +68,44 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
     if matches:
         # Use the top match and return it as a CaseSummary. The DB stores a solution and description.
         m = matches[0]
-        summary_text = (m.get("description") or "")
-        if summary_text and len(summary_text) > 200:
-            summary_text = summary_text[:197] + "..."
-        suggested_solution = m.get("solution") or "Solution retrieved from vector DB"
-        # Return a high-confidence value for retrieved solutions
-        result = CaseSummary(summary=summary_text or (data.get("description")[:200] if data.get("description") else ""),
-                             suggested_solution=suggested_solution,
-                             confidence=0.95)
-        return result.model_dump()
+        # If the DB row contains a stored confidence, trust it. Otherwise call the LLM summarizer
+        # to compute a confidence and tokens for the matched solution.
+        stored_conf = m.get("confidence")
+        stored_summary = m.get("description") or ""
+        stored_solution = m.get("solution") or "Solution retrieved from vector DB"
+
+        if stored_conf is not None:
+            # Use stored values; coerce summary length for display
+            summary_text = stored_summary
+            if summary_text and len(summary_text) > 200:
+                summary_text = summary_text[:197] + "..."
+            result = CaseSummary(
+                summary=summary_text or (data.get("description")[:200] if data.get("description") else ""),
+                suggested_solution=stored_solution,
+                confidence=float(stored_conf),
+                tokens=m.get("tokens") if m.get("tokens") is not None else None,
+            )
+            return result.model_dump()
+
+        # No stored confidence -> call the summarizer to get LLM-derived confidence/tokens
+        try:
+            # Build a minimal input for the summarizer using the stored description/title
+            summarize_input = {"title": m.get("title"), "description": m.get("description"), "facts": []}
+            llm_result = tool.run(summarize_input)
+            # tool.run returns a dict with summary, suggested_solution, confidence, tokens
+            return llm_result
+        except Exception:
+            # As a last resort, fall back to a conservative confidence but do not hardcode 0.95
+            summary_text = (m.get("description") or "")
+            if summary_text and len(summary_text) > 200:
+                summary_text = summary_text[:197] + "..."
+            result = CaseSummary(
+                summary=summary_text or (data.get("description")[:200] if data.get("description") else ""),
+                suggested_solution=stored_solution,
+                confidence=0.5,
+                tokens=None,
+            )
+            return result.model_dump()
 
     # No vector DB match -> use LLM summarizer tool
     return tool.run(data)

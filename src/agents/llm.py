@@ -35,6 +35,7 @@ def call_openai_for_summary(description: str, facts: Optional[list] = None) -> d
 
     # Try modern openai v1 chat API first (openai.chat.completions.create)
     text = None
+    tokens = None
     try:
         if hasattr(openai, "chat") and hasattr(openai.chat, "completions"):
             resp = openai.chat.completions.create(
@@ -45,6 +46,10 @@ def call_openai_for_summary(description: str, facts: Optional[list] = None) -> d
             )
             # resp.choices[0].message.content for older API; v1 returns resp.choices[0].message.content as well
             text = resp.choices[0].message.content.strip()
+            try:
+                tokens = resp.usage.total_tokens
+            except Exception:
+                tokens = getattr(resp, "usage", {}).get("total_tokens") if resp is not None else None
         elif hasattr(openai, "ChatCompletion") and hasattr(openai.ChatCompletion, "create"):
             resp = openai.ChatCompletion.create(
                 model=settings.OPENAI_MODEL,
@@ -53,6 +58,10 @@ def call_openai_for_summary(description: str, facts: Optional[list] = None) -> d
                 max_tokens=500,
             )
             text = resp.choices[0].message.content.strip()
+            try:
+                tokens = resp.usage.total_tokens
+            except Exception:
+                tokens = getattr(resp, "usage", {}).get("total_tokens") if resp is not None else None
         else:
             # Fallback: try the legacy completions API
             resp = openai.Completion.create(
@@ -62,6 +71,10 @@ def call_openai_for_summary(description: str, facts: Optional[list] = None) -> d
                 max_tokens=500,
             )
             text = resp.choices[0].text.strip()
+            try:
+                tokens = resp.usage.total_tokens
+            except Exception:
+                tokens = getattr(resp, "usage", {}).get("total_tokens") if resp is not None else None
     except Exception as e:
         raise RuntimeError(
             "OpenAI request failed. Ensure OPENAI_API_KEY is set and the openai package is compatible. "
@@ -81,5 +94,12 @@ def call_openai_for_summary(description: str, facts: Optional[list] = None) -> d
         data = json.loads(text)
     except Exception as e:
         raise RuntimeError(f"Failed to parse OpenAI response as JSON: {e}\nResponse:\n{text}")
+
+    # Attach token usage if available
+    if tokens is not None:
+        try:
+            data["tokens"] = int(tokens)
+        except Exception:
+            data["tokens"] = None
 
     return data
