@@ -153,7 +153,7 @@ def query_similar(description: str, top_k: int = 3) -> List[Dict[str, Any]]:
                 emb = None
 
         if not emb or not q_emb:
-            # fallback: substring match
+            # fallback: substring match (very coarse)
             score = 1.0 if (description and r.get("description") and (description in r.get("description") or r.get("description") in description)) else 0.0
         else:
             try:
@@ -166,8 +166,15 @@ def query_similar(description: str, top_k: int = 3) -> List[Dict[str, Any]]:
             except Exception:
                 score = 0.0
 
-        if score > 0:
+    # Only include sufficiently similar rows
+    if score > settings.CASE_SIMILARITY_THRESHOLD:
+            try:
+                r["similarity"] = float(score)
+            except Exception:
+                r["similarity"] = None
+            r["tokens"] = None
             results.append({"score": score, "row": r})
 
+    # Sort by score desc and return the top_k rows (augmented)
     results.sort(key=lambda x: x["score"], reverse=True)
     return [r["row"] for r in results[:top_k]]

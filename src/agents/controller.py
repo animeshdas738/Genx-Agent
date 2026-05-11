@@ -4,13 +4,13 @@ from src.agents.tools import SummarizeTool
 from src.agents.models import CaseDetail, CaseSummary
 from src.vectordb import query_similar
 from src.vectordb import upsert_cases
+from src.db.agent_requests import insert_agent_request
 import json
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 tool = SummarizeTool()
-
 
 @router.post("/summarize", response_model=CaseSummary)
 async def summarize(request: Request, user: str = Depends(get_current_user)):
@@ -65,6 +65,7 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
     except Exception:
         matches = []
 
+    #print(f"[agents.controller] vector DB query returned {len(matches)} matches for description: {data.get('description')[:100]}...")
     if matches:
         # Use the top match and return it as a CaseSummary. The DB stores a solution and description.
         m = matches[0]
@@ -73,8 +74,15 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
         stored_conf = m.get("confidence")
         stored_summary = m.get("description") or ""
         stored_solution = m.get("solution") or "Solution retrieved from vector DB"
+        # coerce stored confidence to a float when possible; treat invalid/missing as None
+        try:
+            stored_conf_val = float(stored_conf) if stored_conf is not None else None
+        except Exception:
+            stored_conf_val = None
 
-        if stored_conf is not None:
+        print(f"[agents.controller] top vector DB match has confidence={stored_conf_val}, summary='{stored_summary[:100]}...', solution='{stored_solution[:100]}...'")
+        # Only treat this as a retrieved (trusted) match when we have a numeric confidence
+        if stored_conf_val is not None:
             # Use stored values; coerce summary length for display
             summary_text = stored_summary
             if summary_text and len(summary_text) > 200:
@@ -82,9 +90,31 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
             result = CaseSummary(
                 summary=summary_text or (data.get("description")[:200] if data.get("description") else ""),
                 suggested_solution=stored_solution,
-                confidence=float(stored_conf),
+                confidence=float(stored_conf_val),
                 tokens=m.get("tokens") if m.get("tokens") is not None else None,
+                similarity=float(stored_conf_val) if stored_conf_val is not None else None,
             )
+            print(f"[agents.controller] returning retrieved match with confidence {result.confidence} for case_id={m.get('case_id') or m.get('caseId')}")
+            # log the retrieval event
+            try:
+                print(f"[agents.controller] attempting to insert_agent_request for retrieved match case_id={m.get('case_id') or m.get('caseId')}")
+                insert_agent_request(
+                    endpoint="/agents/summarize",
+                    payload={"description": data.get("description"), "title": data.get("title")},
+                    response=result.model_dump(),
+                    case_id=m.get("case_id") or m.get("caseId") or None,
+                    model=None,
+                    confidence=float(stored_conf_val) if stored_conf_val is not None else None,
+                    tokens=m.get("tokens") if m.get("tokens") is not None else None,
+                    status="retrieved",
+                )
+                print(f"[agents.controller] insert_agent_request returned successfully for retrieved match")
+            except Exception as e:
+                import traceback
+
+                print(f"[agents.controller] failed to log retrieved agent request: {e}")
+                print(traceback.format_exc())
+
             return result.model_dump()
 
         # No stored confidence -> call the summarizer to get LLM-derived confidence/tokens
@@ -108,7 +138,29 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
             return result.model_dump()
 
     # No vector DB match -> use LLM summarizer tool
-    return tool.run(data)
+    result = tool.run(data)
+
+    # Try to log the agent request/response
+    try:
+        print(f"[agents.controller] attempting to insert_agent_request for generated result case_id={data.get('id')}")
+        insert_agent_request(
+            endpoint="/agents/summarize",
+            payload=data,
+            response=result,
+            case_id=data.get("id") or None,
+            model=None,
+            confidence=result.get("confidence") if isinstance(result, dict) else None,
+            tokens=result.get("tokens") if isinstance(result, dict) else None,
+            status="generated",
+        )
+        print(f"[agents.controller] insert_agent_request returned successfully for generated result")
+    except Exception as e:
+        import traceback
+
+        print(f"[agents.controller] failed to log generated agent request: {e}")
+        print(traceback.format_exc())
+
+    return result
 
 
 

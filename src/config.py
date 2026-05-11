@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str | None = None
     # If your case_vectors table lives in a schema (for example 'Agent'), set it here.
     CASE_VECTOR_SCHEMA: str = "Agent"
+    # Similarity threshold for returning vector DB matches (cosine similarity)
+    CASE_SIMILARITY_THRESHOLD: float = 0.5
 
 
 settings = Settings()
