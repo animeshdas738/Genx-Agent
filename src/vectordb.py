@@ -120,11 +120,35 @@ def upsert_cases(cases: List[Dict[str, Any]]):
             pass
 
 
+def similarity_to_confidence(similarity: float, min_conf: float = 0.5, max_conf: float = 0.99) -> Optional[float]:
+    """Map a raw cosine similarity score to a bounded confidence value.
+
+    - similarity: raw cosine similarity (expected in [0,1]).
+    - values below settings.CASE_SIMILARITY_THRESHOLD return None.
+    - maps [threshold, 1.0] -> [min_conf, max_conf] linearly and clamps.
+    """
+    if similarity is None:
+        return None
+    try:
+        s = float(similarity)
+    except Exception:
+        return None
+
+    thr = float(getattr(settings, "CASE_SIMILARITY_THRESHOLD", 0.5))
+    if s <= thr:
+        return None
+    # normalize to [0,1]
+    norm = (s - thr) / (1.0 - thr) if (1.0 - thr) > 0 else 1.0
+    conf = min_conf + norm * (max_conf - min_conf)
+    # clamp
+    conf = max(min_conf, min(conf, max_conf))
+    return round(conf, 3)
+
+
 def query_similar(description: str, top_k: int = 3) -> List[Dict[str, Any]]:
     conn = get_conn()
     if conn is None:
         return []
-
     with conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             schema = settings.CASE_VECTOR_SCHEMA
@@ -135,13 +159,12 @@ def query_similar(description: str, top_k: int = 3) -> List[Dict[str, Any]]:
 
             cur.execute(sql.SQL("SELECT case_id, title, description, solution, embedding FROM {}").format(tbl))
             rows = cur.fetchall()
-
     # compute embedding for query
     try:
         q_emb = _compute_embedding(description)
     except Exception:
         q_emb = None
-
+    
     results: List[Dict[str, Any]] = []
     for r in rows:
         emb = r.get("embedding")
@@ -165,9 +188,8 @@ def query_similar(description: str, top_k: int = 3) -> List[Dict[str, Any]]:
                 score = (dot / (norma * normb)) if norma and normb else 0.0
             except Exception:
                 score = 0.0
-
     # Only include sufficiently similar rows
-    if score > settings.CASE_SIMILARITY_THRESHOLD:
+        if score > settings.CASE_SIMILARITY_THRESHOLD:
             try:
                 r["similarity"] = float(score)
             except Exception:
@@ -177,4 +199,5 @@ def query_similar(description: str, top_k: int = 3) -> List[Dict[str, Any]]:
 
     # Sort by score desc and return the top_k rows (augmented)
     results.sort(key=lambda x: x["score"], reverse=True)
+    #print('Line 202------results: ' + str(results))
     return [r["row"] for r in results[:top_k]]

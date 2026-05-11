@@ -2,8 +2,7 @@ from fastapi import APIRouter, Depends, Request
 from src.security import get_current_user
 from src.agents.tools import SummarizeTool
 from src.agents.models import CaseDetail, CaseSummary
-from src.vectordb import query_similar
-from src.vectordb import upsert_cases
+from src.vectordb import query_similar, upsert_cases, similarity_to_confidence
 from src.db.agent_requests import insert_agent_request
 import json
 
@@ -71,18 +70,22 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
         m = matches[0]
         # If the DB row contains a stored confidence, trust it. Otherwise call the LLM summarizer
         # to compute a confidence and tokens for the matched solution.
-        stored_conf = m.get("confidence")
+        #print('m-------' + str(m))
+        stored_conf = m.get("similarity")
+        print('stored_conf====' + str(stored_conf))
         stored_summary = m.get("description") or ""
         stored_solution = m.get("solution") or "Solution retrieved from vector DB"
-        # coerce stored confidence to a float when possible; treat invalid/missing as None
+        # stored_conf is the raw similarity (from vectordb). Map it to a calibrated
+        # confidence value for display and decision-making.
         try:
-            stored_conf_val = float(stored_conf) if stored_conf is not None else None
+            stored_similarity = float(stored_conf) if stored_conf is not None else None
         except Exception:
-            stored_conf_val = None
+            stored_similarity = None
 
-        print(f"[agents.controller] top vector DB match has confidence={stored_conf_val}, summary='{stored_summary[:100]}...', solution='{stored_solution[:100]}...'")
-        # Only treat this as a retrieved (trusted) match when we have a numeric confidence
-        if stored_conf_val is not None:
+        mapped_conf = similarity_to_confidence(stored_similarity) if stored_similarity is not None else None
+        print(f"[agents.controller] top vector DB match has similarity={stored_similarity}, mapped_confidence={mapped_conf}, summary='{stored_summary[:100]}...', solution='{stored_solution[:100]}...'")
+        # Only treat this as a retrieved (trusted) match when mapping produced a confidence
+        if mapped_conf is not None:
             # Use stored values; coerce summary length for display
             summary_text = stored_summary
             if summary_text and len(summary_text) > 200:
@@ -90,9 +93,9 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
             result = CaseSummary(
                 summary=summary_text or (data.get("description")[:200] if data.get("description") else ""),
                 suggested_solution=stored_solution,
-                confidence=float(stored_conf_val),
+                confidence=float(mapped_conf),
                 tokens=m.get("tokens") if m.get("tokens") is not None else None,
-                similarity=float(stored_conf_val) if stored_conf_val is not None else None,
+                similarity=float(stored_similarity) if stored_similarity is not None else None,
             )
             print(f"[agents.controller] returning retrieved match with confidence {result.confidence} for case_id={m.get('case_id') or m.get('caseId')}")
             # log the retrieval event
@@ -104,7 +107,7 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
                     response=result.model_dump(),
                     case_id=m.get("case_id") or m.get("caseId") or None,
                     model=None,
-                    confidence=float(stored_conf_val) if stored_conf_val is not None else None,
+                    confidence=float(mapped_conf) if mapped_conf is not None else None,
                     tokens=m.get("tokens") if m.get("tokens") is not None else None,
                     status="retrieved",
                 )
