@@ -8,6 +8,7 @@ class CaseDetail(BaseModel):
     description: str
     facts: Optional[List[str]] = Field(default_factory=list)
     metadata: Optional[dict] = None
+    context: Optional[str] = None
 
 
 class CaseSummary(BaseModel):

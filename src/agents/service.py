@@ -14,6 +14,7 @@ except Exception:
 
 def summarize_case(case: CaseDetail) -> CaseSummary:
     desc = case.description.strip()
+    context = case.context
 
     # Prefer LangChain adapter if available
     #if settings.OPENAI_API_KEY and call_langchain_for_summary is not None:
@@ -30,7 +31,7 @@ def summarize_case(case: CaseDetail) -> CaseSummary:
     # If LangChain unavailable, try direct OpenAI adapter
     if settings.OPENAI_API_KEY and call_openai_for_summary is not None:
         try:
-            data = call_openai_for_summary(desc, facts=case.facts or [])
+            data = call_openai_for_summary(desc, facts=case.facts or [], context=context)
             print(f"OpenAI response data: {data}")
             # Validate basic shape and coerce types
             summary = str(data.get("summary", ""))

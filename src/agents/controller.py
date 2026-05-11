@@ -63,6 +63,11 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
         matches = query_similar(str(data.get("description") or ""), top_k=1)
     except Exception:
         matches = []
+    if matches:
+        context = "Found similar cases:\n"
+        for m in matches:
+            context += f"- {m.get('title')}: {m.get('description')}\n"
+        data["context"] = context
 
     #print(f"[agents.controller] vector DB query returned {len(matches)} matches for description: {data.get('description')[:100]}...")
     if matches:
@@ -145,7 +150,6 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
 
     # Try to log the agent request/response
     try:
-        print(f"[agents.controller] attempting to insert_agent_request for generated result case_id={data.get('id')}")
         insert_agent_request(
             endpoint="/agents/summarize",
             payload=data,
@@ -156,7 +160,6 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
             tokens=result.get("tokens") if isinstance(result, dict) else None,
             status="generated",
         )
-        print(f"[agents.controller] insert_agent_request returned successfully for generated result")
     except Exception as e:
         import traceback
 
