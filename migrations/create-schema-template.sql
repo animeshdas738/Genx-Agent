@@ -54,4 +54,7 @@ BEFORE UPDATE ON "Agent".users
 FOR EACH ROW
 EXECUTE FUNCTION "Agent".trigger_set_timestamp();
 
+
+INSERT INTO "Agent".users (username, email, password_hash, is_superuser) VALUES ('animeshdas738', 'animesh.das738@gmail.com', '$2b$12$5xC7iAYjmD.Rss3QlcPs/O7wSwcUKmAS0WKlPx2uxczamu3K6z.CS', TRUE)
+
 -- End of schema/template

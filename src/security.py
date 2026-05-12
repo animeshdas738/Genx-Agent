@@ -4,8 +4,11 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
+from passlib.context import CryptContext
 
 from src.config import settings
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
 
@@ -21,7 +24,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 
-def verify_token(token: str) -> dict:
+async def verify_token(token: str) -> dict:
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         return payload
@@ -33,9 +36,17 @@ def verify_token(token: str) -> dict:
         )
 
 
-def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
-    payload = verify_token(token)
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
+    payload = await verify_token(token)
     username: str = payload.get("sub")
     if username is None:
         raise HTTPException(status_code=401, detail="Invalid token")
     return username
+
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def get_password_hash(password):
+    return pwd_context.hash(password)

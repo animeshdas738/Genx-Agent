@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, HTTPException
 from src.security import get_current_user
 from src.agents.tools import SummarizeTool
 from src.agents.models import CaseDetail, CaseSummary
 from src.vectordb import query_similar, upsert_cases, similarity_to_confidence
 from src.db.agent_requests import insert_agent_request
+from src.services import license_service
 import json
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -17,6 +18,10 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
 
     Accepts either JSON body or form-encoded body for easier curl usage.
     """
+    agent_id = "summarize_agent"
+    if not await license_service.has_access(user, agent_id):
+        raise HTTPException(status_code=403, detail="Resource is not available.")
+    
     content_type = request.headers.get("content-type", "")
     data = None
 
@@ -54,8 +59,6 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
 
     # Ensure description exists before building CaseDetail to avoid 500
     if not data or "description" not in data or not str(data.get("description") or "").strip():
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=400, detail="Missing required field: description")
 
     # Before calling the LLM summarizer, check the vector DB for a probable stored solution.
