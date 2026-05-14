@@ -65,16 +65,70 @@ class SummarizeTool(GenericAgentTool):
         summary = summarize_case(inp, prompt_template=_PROMPT_TEMPLATE)
 
         # Map CaseSummary -> BaseToolOutput
+        merged_extra: dict = {}
+        # include similarity if present
+        if getattr(summary, "similarity", None) is not None:
+            merged_extra["similarity"] = getattr(summary, "similarity")
+        # merge any extra returned by the service (revenue, employees, etc.)
+        if getattr(summary, "extra", None):
+            try:
+                merged_extra.update(summary.extra)
+            except Exception:
+                # ignore if extra is not a mapping
+                pass
+
         out = BaseToolOutput(
             summary=summary.summary,
             suggested_solution=summary.suggested_solution,
             confidence=summary.confidence,
             tokens=summary.tokens,
-            extra={
-                "similarity": getattr(summary, "similarity", None)
-            },
+            extra=merged_extra or None,
         )
         return out
+
+
+
+class AccountSummaryTool(GenericAgentTool):
+    """Generate an account-level summary from a website URL or HTML snippet."""
+
+    name = "account_summarizer"
+    description = "Generate an account summary from a website URL or HTML/text input."
+
+    def call(self, inp: BaseToolInput) -> BaseToolOutput:
+        # Treat inp.description as the website URL or raw HTML/text
+        # For now we reuse the same summarization pipeline — the LLM prompt
+        # will be chosen from the DB if available, otherwise default.
+        summary = summarize_case(inp, prompt_template=_PROMPT_TEMPLATE)
+        merged_extra = {"source": "account"}
+        if getattr(summary, "extra", None):
+            try:
+                merged_extra.update(summary.extra)
+            except Exception:
+                pass
+
+        out = BaseToolOutput(
+            summary=summary.summary,
+            suggested_solution=summary.suggested_solution,
+            confidence=summary.confidence,
+            tokens=summary.tokens,
+            extra=merged_extra or None,
+        )
+        return out
+
+
+# account summarizer instance
+account_summarizer = AccountSummaryTool()
+if LangChainTool is not None and account_summarizer is not None:
+    try:
+        def _acc_fn(inp_text: str) -> Dict[str, Any]:
+            return account_summarizer.run({"description": inp_text})
+
+        try:
+            _ = LangChainTool.from_function(func=_acc_fn, name=account_summarizer.name, description=account_summarizer.description)
+        except Exception:
+            _ = LangChainTool(func=_acc_fn, name=account_summarizer.name, description=account_summarizer.description)
+    except Exception:
+        pass
 
 
 # Create a single shared instance and, if LangChain is present, expose a LangChain Tool

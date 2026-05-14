@@ -18,6 +18,8 @@ class CaseSummary(BaseModel):
     tokens: Optional[int] = None
     # similarity is the raw similarity score returned by the vector DB (cosine similarity)
     similarity: Optional[float] = None
+    # arbitrary extra metadata returned by the LLM (revenue, employees, etc.)
+    extra: Optional[dict] = None
 
 
 # Generic tool IO models so tools can reuse the same shapes.

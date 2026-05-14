@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Request, HTTPException
 from src.security import get_current_user
 from src.agents.tools import SummarizeTool
+from src.agents.tools import account_summarizer
 from src.agents.models import CaseDetail, CaseSummary
 from src.vectordb import query_similar, upsert_cases, similarity_to_confidence
 from src.db.agent_requests import insert_agent_request
@@ -168,6 +169,64 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
 
         print(f"[agents.controller] failed to log generated agent request: {e}")
         print(traceback.format_exc())
+
+    return result
+
+
+
+
+@router.post("/account-summary", response_model=CaseSummary)
+async def account_summary(request: Request, user: str = Depends(get_current_user)):
+    """Generate an account-level summary from a website URL or text input.
+
+    Body should include 'description' with a URL or raw text extracted from a website.
+    """
+    agent_id = "account_summary_agent"
+    if not await license_service.has_access(user, agent_id):
+        raise HTTPException(status_code=403, detail="Resource is not available.")
+
+    content_type = request.headers.get("content-type", "")
+    data = None
+
+    if "application/json" in content_type:
+        data = await request.json() or {}
+    else:
+        form = await request.form()
+        data = {k: form.get(k) for k in form.keys()} if form else {}
+        if "facts" in data and isinstance(data["facts"], str):
+            try:
+                data["facts"] = json.loads(data["facts"])
+            except Exception:
+                data["facts"] = [f.strip() for f in data["facts"].split(",") if f.strip()]
+
+    if not data:
+        text = (await request.body()).decode(errors="ignore").strip()
+        if text:
+            data = {"description": text}
+
+    if not data or "description" not in data or not str(data.get("description") or "").strip():
+        raise HTTPException(status_code=400, detail="Missing required field: description")
+
+    # Directly use the account summarizer tool (LLM-only path)
+    try:
+        result = account_summarizer.run(data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # log the request
+    try:
+        insert_agent_request(
+            endpoint="/agents/account-summary",
+            payload=data,
+            response=result,
+            case_id=data.get("id") or None,
+            model=None,
+            confidence=result.get("confidence") if isinstance(result, dict) else None,
+            tokens=result.get("tokens") if isinstance(result, dict) else None,
+            status="generated",
+        )
+    except Exception:
+        pass
 
     return result
 

@@ -40,7 +40,13 @@ def summarize_case(case: BaseToolInput | CaseDetail, prompt_template: str | None
             suggested_solution = str(data.get("suggested_solution", ""))
             confidence = float(data.get("confidence", 0.0))
             tokens = data.get("tokens")
-            return CaseSummary(summary=summary, suggested_solution=suggested_solution, confidence=confidence, tokens=tokens)
+            extra = data.get("extra") or {
+                "revenue": data.get("revenue"),
+                "employees": data.get("employees"),
+                "parent_company": data.get("parent_company"),
+                "sentiment": data.get("sentiment"),
+            }
+            return CaseSummary(summary=summary, suggested_solution=suggested_solution, confidence=confidence, tokens=tokens, extra=extra)
         except Exception as e:
             # fallback to heuristic summarizer on any LLM error
             print(f"OpenAI summarization failed, falling back: {e}")

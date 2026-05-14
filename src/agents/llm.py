@@ -31,18 +31,24 @@ def call_openai_for_summary(description: str, facts: Optional[list] = None, cont
         prompt = prompt.replace("{facts}", "\n".join(facts or []))
     else:
         prompt = (
-            "You are an assistant that converts a case description into a JSON object with keys:"
-            " summary (short), suggested_solution (concise), confidence (float 0..1).\n\n"
+            "You are an assistant that extracts business information from the provided account description and returns a JSON object. The JSON must include:\n"
+            "- summary: a short (1-3 sentence) account overview\n"
+            "- suggested_solution: concise recommendation or action items\n"
+            "- confidence: a float between 0 and 1 indicating confidence in the extracted fields\n"
+            "- revenue: estimated annual revenue (string or number, nullable)\n"
+            "- employees: estimated employee count (string or number, nullable)\n"
+            "- parent_company: parent company name if applicable (nullable)\n"
+            "- sentiment: short sentiment summary or recent news summary (nullable)\n\n"
             f"Description:\n{description}\n\n"
         )
 
         if context:
-            prompt += f"Context from similar cases:\n{context}\n\n"
+            prompt += f"Context from similar cases or notes:\n{context}\n\n"
 
         if facts:
             prompt += "Facts:\n" + "\n".join(facts) + "\n\n"
-        
-        prompt += "Based on the description and context, provide a refined solution approach."
+
+        prompt += "Return only valid JSON. Be conservative when guessing numeric estimates. If unknown, set fields to null."
 
     # Try modern openai v1 chat API first (openai.chat.completions.create)
     text = None
