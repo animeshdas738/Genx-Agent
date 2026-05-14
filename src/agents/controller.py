@@ -80,7 +80,7 @@ async def summarize(request: Request, user: str = Depends(get_current_user)):
         # to compute a confidence and tokens for the matched solution.
         #print('m-------' + str(m))
         stored_conf = m.get("similarity")
-        print('stored_conf====' + str(stored_conf))
+        #print('stored_conf====' + str(stored_conf))
         stored_summary = m.get("description") or ""
         stored_solution = m.get("solution") or "Solution retrieved from vector DB"
         # stored_conf is the raw similarity (from vectordb). Map it to a calibrated
