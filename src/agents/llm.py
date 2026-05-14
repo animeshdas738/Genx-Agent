@@ -9,7 +9,7 @@ except Exception:
     openai = None
 
 
-def call_openai_for_summary(description: str, facts: Optional[list] = None, context: Optional[str] = None) -> dict:
+def call_openai_for_summary(description: str, facts: Optional[list] = None, context: Optional[str] = None, prompt_template: Optional[str] = None) -> dict:
     """Call OpenAI chat completion to generate a summary JSON.
 
     The function expects the model to return a JSON object with keys:
@@ -24,19 +24,25 @@ def call_openai_for_summary(description: str, facts: Optional[list] = None, cont
 
     openai.api_key = settings.OPENAI_API_KEY
 
-    prompt = (
-        "You are an assistant that converts a case description into a JSON object with keys:"
-        " summary (short), suggested_solution (concise), confidence (float 0..1).\n\n"
-        f"Description:\n{description}\n\n"
-    )
+    if prompt_template:
+        # if the database provides a prompt template, interpolate values
+        prompt = prompt_template.replace("{description}", description or "")
+        prompt = prompt.replace("{context}", context or "")
+        prompt = prompt.replace("{facts}", "\n".join(facts or []))
+    else:
+        prompt = (
+            "You are an assistant that converts a case description into a JSON object with keys:"
+            " summary (short), suggested_solution (concise), confidence (float 0..1).\n\n"
+            f"Description:\n{description}\n\n"
+        )
 
-    if context:
-        prompt += f"Context from similar cases:\n{context}\n\n"
+        if context:
+            prompt += f"Context from similar cases:\n{context}\n\n"
 
-    if facts:
-        prompt += "Facts:\n" + "\n".join(facts) + "\n\n"
-    
-    prompt += "Based on the description and context, provide a refined solution approach."
+        if facts:
+            prompt += "Facts:\n" + "\n".join(facts) + "\n\n"
+        
+        prompt += "Based on the description and context, provide a refined solution approach."
 
     # Try modern openai v1 chat API first (openai.chat.completions.create)
     text = None

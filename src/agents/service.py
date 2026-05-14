@@ -1,4 +1,4 @@
-from src.agents.models import CaseDetail, CaseSummary
+from src.agents.models import CaseDetail, CaseSummary, BaseToolInput
 from typing import List
 from src.config import settings
 
@@ -12,9 +12,10 @@ except Exception:
 #    call_langchain_for_summary = None
 
 
-def summarize_case(case: CaseDetail) -> CaseSummary:
-    desc = case.description.strip()
-    context = case.context
+def summarize_case(case: BaseToolInput | CaseDetail, prompt_template: str | None = None) -> CaseSummary:
+    # Accept either the legacy CaseDetail or the new BaseToolInput
+    desc = (getattr(case, 'description', '') or '').strip()
+    context = getattr(case, 'context', None)
 
     # Prefer LangChain adapter if available
     #if settings.OPENAI_API_KEY and call_langchain_for_summary is not None:
@@ -31,7 +32,8 @@ def summarize_case(case: CaseDetail) -> CaseSummary:
     # If LangChain unavailable, try direct OpenAI adapter
     if settings.OPENAI_API_KEY and call_openai_for_summary is not None:
         try:
-            data = call_openai_for_summary(desc, facts=case.facts or [], context=context)
+            facts = getattr(case, 'facts', []) or []
+            data = call_openai_for_summary(desc, facts=facts, context=context, prompt_template=prompt_template)
             print(f"OpenAI response data: {data}")
             # Validate basic shape and coerce types
             summary = str(data.get("summary", ""))
