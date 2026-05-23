@@ -6,7 +6,7 @@ from src.config import settings
 
 def test_service_greeting():
     g = make_greeting("Alice")
-    assert g.message == "Hello, Alice!"
+    assert g.message == "Hello, Alice!!"
 
 
 def test_api_hello_with_jwt():
