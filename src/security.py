@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, HTTPException, Security, status
+from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
@@ -10,7 +10,8 @@ from src.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token", auto_error=False)
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -36,12 +37,29 @@ async def verify_token(token: str) -> dict:
         )
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
-    payload = await verify_token(token)
-    username: str = payload.get("sub")
-    if username is None:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return username
+async def get_current_user(
+    token: Optional[str] = Security(oauth2_scheme),
+    api_key: Optional[str] = Security(api_key_header),
+) -> str:
+    # Try JWT first
+    if token:
+        payload = await verify_token(token)
+        username: str = payload.get("sub")
+        if username:
+            return username
+
+    # Fall back to API key
+    if api_key:
+        from src.db import api_keys as api_keys_db
+        user = await api_keys_db.get_user_by_api_key(api_key)
+        if user:
+            return user["username"]
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def verify_password(plain_password, hashed_password):
