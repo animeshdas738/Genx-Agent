@@ -4,9 +4,10 @@ import asyncio
 
 from pydantic import Field
 
-from src.agents.models import BaseToolInput, BaseToolOutput
+from src.agents.models import BaseToolInput, BaseToolOutput, CaseResolutionInput, CaseResolutionOutput
 from src.agents.service import summarize_case
 from src.db import agents as db_agents
+from src.vectordb import query_similar, similarity_to_confidence
 
 try:
     # LangChain Tool class (v0.0x+)
@@ -115,6 +116,61 @@ class AccountSummaryTool(GenericAgentTool):
         )
         return out
 
+
+_UNRESOLVED_MSG = "AI agent is not able to resolve the issue, assign the case to support agent"
+
+
+class CaseResolutionTool:
+    """Look up case_vector table for a resolution. Returns stored solution or unresolved message."""
+
+    name = "case_resolution"
+    description = "Resolve a support case by matching subject and description against the case vector store."
+
+    def resolve(self, inp: CaseResolutionInput) -> CaseResolutionOutput:
+        query_text = f"{inp.subject}\n{inp.description}"
+        try:
+            matches = query_similar(query_text, top_k=1)
+        except Exception:
+            matches = []
+
+        if matches:
+            m = matches[0]
+            stored_similarity = m.get("similarity")
+            try:
+                stored_similarity = float(stored_similarity) if stored_similarity is not None else None
+            except Exception:
+                stored_similarity = None
+
+            mapped_conf = similarity_to_confidence(stored_similarity) if stored_similarity is not None else None
+
+            if mapped_conf is not None:
+                solution = m.get("solution") or _UNRESOLVED_MSG
+                return CaseResolutionOutput(
+                    resolution=solution,
+                    confidence=float(mapped_conf),
+                    source="vector_db",
+                    similarity=stored_similarity,
+                )
+
+        return CaseResolutionOutput(
+            resolution=_UNRESOLVED_MSG,
+            confidence=None,
+            source="unresolved",
+            similarity=None,
+        )
+
+    def run(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        if isinstance(data, CaseResolutionInput):
+            inp = data
+        else:
+            inp = CaseResolutionInput(**data)
+        return self.resolve(inp).model_dump()
+
+    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self.run(data)
+
+
+case_resolution_tool = CaseResolutionTool()
 
 # account summarizer instance
 account_summarizer = AccountSummaryTool()

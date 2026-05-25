@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, Request, HTTPException
 from src.security import get_current_user
 from src.agents.tools import SummarizeTool
-from src.agents.tools import account_summarizer
-from src.agents.models import CaseDetail, CaseSummary
+from src.agents.tools import account_summarizer, case_resolution_tool
+from src.agents.models import CaseDetail, CaseSummary, CaseResolutionInput, CaseResolutionOutput
 from src.vectordb import query_similar, upsert_cases, similarity_to_confidence
 from src.db.agent_requests import insert_agent_request
 from src.services import license_service
@@ -230,6 +230,37 @@ async def account_summary(request: Request, user: str = Depends(get_current_user
 
     return result
 
+
+
+@router.post("/resolve", response_model=CaseResolutionOutput)
+async def resolve_case(payload: CaseResolutionInput, user: str = Depends(get_current_user)):
+    """Resolve a support case by matching subject and description against the case vector store.
+
+    Returns the stored resolution when a sufficiently similar case is found.
+    Returns an unresolved message when no match exists, indicating the case should be
+    escalated to a human support agent.
+    """
+    agent_id = "case_resolution_agent"
+    if not await license_service.has_access(user, agent_id):
+        raise HTTPException(status_code=403, detail="Resource is not available.")
+
+    result = case_resolution_tool.run(payload)
+
+    try:
+        insert_agent_request(
+            endpoint="/agents/resolve",
+            payload={"subject": payload.subject, "description": payload.description},
+            response=result,
+            case_id=None,
+            model=None,
+            confidence=result.get("confidence"),
+            tokens=None,
+            status=result.get("source", "unresolved"),
+        )
+    except Exception as e:
+        print(f"[agents.controller] failed to log resolve request: {e}")
+
+    return result
 
 
 @router.post("/vectors")

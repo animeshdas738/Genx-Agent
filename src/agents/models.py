@@ -38,3 +38,15 @@ class BaseToolOutput(BaseModel):
     confidence: Optional[float] = None
     tokens: Optional[int] = None
     extra: Optional[dict] = None
+
+
+class CaseResolutionInput(BaseModel):
+    subject: str
+    description: str
+
+
+class CaseResolutionOutput(BaseModel):
+    resolution: str
+    confidence: Optional[float] = None
+    source: str  # "vector_db" | "unresolved"
+    similarity: Optional[float] = None
