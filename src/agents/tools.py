@@ -1,13 +1,16 @@
 
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Dict, Optional
 import asyncio
-
-from pydantic import Field
 
 from src.agents.models import BaseToolInput, BaseToolOutput, CaseResolutionInput, CaseResolutionOutput
 from src.agents.service import summarize_case
 from src.db import agents as db_agents
-from src.vectordb import query_similar, similarity_to_confidence
+from src.vectordb import query_similar
+
+try:
+    from src.agents.llm import call_openai_for_resolution
+except Exception:
+    call_openai_for_resolution = None
 
 try:
     # LangChain Tool class (v0.0x+)
@@ -28,8 +31,7 @@ class GenericAgentTool:
     name: str = "generic_agent_tool"
     description: str = "Generic agent tool"
 
-    def call(self, inp: BaseToolInput) -> BaseToolOutput:
-        """Override in subclasses with agent-specific behaviour."""
+    def call(self, inp: BaseToolInput) -> BaseToolOutput:  # noqa: ARG002
         raise NotImplementedError()
 
     def run(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -128,35 +130,60 @@ class CaseResolutionTool:
 
     def resolve(self, inp: CaseResolutionInput) -> CaseResolutionOutput:
         query_text = f"{inp.subject}\n{inp.description}"
+
+        # Step 1: query vector DB for similar resolved cases
         try:
-            matches = query_similar(query_text, top_k=1)
+            matches = query_similar(query_text, top_k=3)
         except Exception:
             matches = []
 
+        # Step 2: build context and capture top similarity for the response
+        context = None
+        top_similarity = None
         if matches:
-            m = matches[0]
-            stored_similarity = m.get("similarity")
+            lines = []
+            for m in matches:
+                title = m.get("title") or ""
+                desc = m.get("description") or ""
+                solution = m.get("solution") or ""
+                lines.append(f"- Title: {title}\n  Description: {desc}\n  Resolution: {solution}")
+            context = "\n".join(lines)
             try:
-                stored_similarity = float(stored_similarity) if stored_similarity is not None else None
+                top_similarity = float(matches[0].get("similarity")) if matches[0].get("similarity") is not None else None
             except Exception:
-                stored_similarity = None
+                top_similarity = None
 
-            mapped_conf = similarity_to_confidence(stored_similarity) if stored_similarity is not None else None
+        # Step 3: call OpenAI with context (if available) to generate resolution
+        if call_openai_for_resolution is not None:
+            try:
+                data = call_openai_for_resolution(inp.subject, inp.description, context=context)
+                resolution = str(data.get("resolution") or "").strip()
+                confidence = data.get("confidence")
+                tokens = data.get("tokens")
+                try:
+                    confidence = float(confidence) if confidence is not None else None
+                except Exception:
+                    confidence = None
 
-            if mapped_conf is not None:
-                solution = m.get("solution") or _UNRESOLVED_MSG
-                return CaseResolutionOutput(
-                    resolution=solution,
-                    confidence=float(mapped_conf),
-                    source="vector_db",
-                    similarity=stored_similarity,
-                )
+                if resolution:
+                    source = "vector_db" if context else "llm"
+                    return CaseResolutionOutput(
+                        resolution=resolution,
+                        confidence=confidence,
+                        source=source,
+                        similarity=top_similarity,
+                        tokens=tokens,
+                    )
+            except Exception as e:
+                print(f"[CaseResolutionTool] OpenAI call failed: {e}")
 
+        # Step 4: fallback — could not generate a resolution
         return CaseResolutionOutput(
             resolution=_UNRESOLVED_MSG,
             confidence=None,
             source="unresolved",
-            similarity=None,
+            similarity=top_similarity,
+            tokens=None,
         )
 
     def run(self, data: Dict[str, Any]) -> Dict[str, Any]:

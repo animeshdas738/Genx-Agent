@@ -120,3 +120,100 @@ def call_openai_for_summary(description: str, facts: Optional[list] = None, cont
             data["tokens"] = None
 
     return data
+
+
+def call_openai_for_resolution(subject: str, description: str, context: Optional[str] = None) -> dict:
+    """Call OpenAI to generate a case resolution using vector DB context when available.
+
+    Returns a dict with:
+      - resolution: suggested resolution string
+      - confidence: float 0..1
+      - tokens: total tokens used (nullable)
+    """
+    if openai is None or not settings.OPENAI_API_KEY:
+        raise RuntimeError("OpenAI not configured")
+
+    openai.api_key = settings.OPENAI_API_KEY
+
+    prompt = (
+        "You are a support agent assistant. Given a support case subject and description, "
+        "generate a clear and actionable resolution.\n\n"
+        "Return a JSON object with:\n"
+        "- resolution: if the resolution has multiple steps or solutions, separate each step with a "
+        "newline character (\\n). Each step should be a complete, actionable instruction.\n"
+        "- confidence: a float between 0 and 1 indicating how confident you are in the resolution\n\n"
+        f"Subject: {subject}\n\n"
+        f"Description: {description}\n\n"
+    )
+
+    if context:
+        prompt += (
+            "The following similar resolved cases from our knowledge base may be relevant:\n"
+            f"{context}\n\n"
+        )
+
+    prompt += (
+        "Return only valid JSON. Separate multiple steps or solutions in the resolution field with \\n. "
+        "If you cannot determine a resolution, set confidence below 0.4."
+    )
+
+    text = None
+    tokens = None
+    try:
+        if hasattr(openai, "chat") and hasattr(openai.chat, "completions"):
+            resp = openai.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=settings.OPENAI_TEMPERATURE,
+                max_tokens=500,
+            )
+            text = resp.choices[0].message.content.strip()
+            try:
+                tokens = resp.usage.total_tokens
+            except Exception:
+                tokens = None
+        elif hasattr(openai, "ChatCompletion") and hasattr(openai.ChatCompletion, "create"):
+            resp = openai.ChatCompletion.create(
+                model=settings.OPENAI_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=settings.OPENAI_TEMPERATURE,
+                max_tokens=500,
+            )
+            text = resp.choices[0].message.content.strip()
+            try:
+                tokens = resp.usage.total_tokens
+            except Exception:
+                tokens = None
+        else:
+            resp = openai.Completion.create(
+                model=settings.OPENAI_MODEL,
+                prompt=prompt,
+                temperature=settings.OPENAI_TEMPERATURE,
+                max_tokens=500,
+            )
+            text = resp.choices[0].text.strip()
+            try:
+                tokens = resp.usage.total_tokens
+            except Exception:
+                tokens = None
+    except Exception as e:
+        raise RuntimeError(f"OpenAI request failed: {e}")
+
+    if text.startswith("```"):
+        parts = text.split("\n", 1)
+        if len(parts) > 1:
+            text = parts[1]
+        text = text.strip().strip("`\n ")
+
+    try:
+        data = json.loads(text)
+    except Exception as e:
+        raise RuntimeError(f"Failed to parse OpenAI response as JSON: {e}\nResponse:\n{text}")
+
+    if tokens is not None:
+        try:
+            data["tokens"] = int(tokens)
+        except Exception:
+            data["tokens"] = None
+
+    return data

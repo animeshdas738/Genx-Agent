@@ -48,5 +48,6 @@ class CaseResolutionInput(BaseModel):
 class CaseResolutionOutput(BaseModel):
     resolution: str
     confidence: Optional[float] = None
-    source: str  # "vector_db" | "unresolved"
+    source: str  # "vector_db" | "llm" | "unresolved"
     similarity: Optional[float] = None
+    tokens: Optional[int] = None
