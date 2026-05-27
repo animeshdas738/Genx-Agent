@@ -51,3 +51,17 @@ class CaseResolutionOutput(BaseModel):
     source: str  # "vector_db" | "llm" | "unresolved"
     similarity: Optional[float] = None
     tokens: Optional[int] = None
+
+
+class SentimentAnalysisInput(BaseModel):
+    text: str
+    context: Optional[str] = None
+    metadata: Optional[dict] = None
+
+
+class SentimentAnalysisOutput(BaseModel):
+    sentiment: str  # "positive" | "negative" | "neutral"
+    score: float = Field(ge=0.0, le=1.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasoning: Optional[str] = None
+    tokens: Optional[int] = None

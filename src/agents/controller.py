@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, Request, HTTPException
 from src.security import get_current_user
 from src.agents.tools import SummarizeTool
-from src.agents.tools import account_summarizer, case_resolution_tool
-from src.agents.models import CaseDetail, CaseSummary, CaseResolutionInput, CaseResolutionOutput
+from src.agents.tools import account_summarizer, case_resolution_tool, sentiment_analysis_tool
+from src.agents.models import CaseDetail, CaseSummary, CaseResolutionInput, CaseResolutionOutput, SentimentAnalysisInput, SentimentAnalysisOutput
 from src.vectordb import query_similar, upsert_cases, similarity_to_confidence
 from src.db.agent_requests import insert_agent_request
 from src.services import license_service
@@ -259,6 +259,38 @@ async def resolve_case(payload: CaseResolutionInput, user: str = Depends(get_cur
         )
     except Exception as e:
         print(f"[agents.controller] failed to log resolve request: {e}")
+
+    return result
+
+
+@router.post("/sentiment", response_model=SentimentAnalysisOutput)
+async def analyze_sentiment(payload: SentimentAnalysisInput, user: str = Depends(get_current_user)):
+    """Classify the sentiment of text as positive, negative, or neutral.
+
+    Returns a sentiment label, strength score, confidence, and optional reasoning.
+    """
+    agent_id = "sentiment_analyzer"
+    if not await license_service.has_access(user, agent_id):
+        raise HTTPException(status_code=403, detail="Resource is not available.")
+
+    try:
+        result = sentiment_analysis_tool.run(payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        insert_agent_request(
+            endpoint="/agents/sentiment",
+            payload={"text": payload.text, "context": payload.context},
+            response=result,
+            case_id=None,
+            model=None,
+            confidence=result.get("confidence"),
+            tokens=result.get("tokens"),
+            status="generated",
+        )
+    except Exception:
+        pass
 
     return result
 

@@ -2,7 +2,7 @@
 from typing import Any, Dict, Optional
 import asyncio
 
-from src.agents.models import BaseToolInput, BaseToolOutput, CaseResolutionInput, CaseResolutionOutput
+from src.agents.models import BaseToolInput, BaseToolOutput, CaseResolutionInput, CaseResolutionOutput, SentimentAnalysisInput, SentimentAnalysisOutput
 from src.agents.service import summarize_case
 from src.db import agents as db_agents
 from src.vectordb import query_similar
@@ -11,6 +11,11 @@ try:
     from src.agents.llm import call_openai_for_resolution
 except Exception:
     call_openai_for_resolution = None
+
+try:
+    from src.agents.llm import call_openai_for_sentiment
+except Exception:
+    call_openai_for_sentiment = None
 
 try:
     # LangChain Tool class (v0.0x+)
@@ -198,6 +203,78 @@ class CaseResolutionTool:
 
 
 case_resolution_tool = CaseResolutionTool()
+
+
+_UNCLASSIFIED_SENTIMENT = "neutral"
+
+
+class SentimentAnalysisTool:
+    """Classify the sentiment of text as positive, negative, or neutral."""
+
+    name = "sentiment_analyzer"
+    description = "Analyze the sentiment of the provided text and return a classification with confidence score."
+
+    def analyze(self, inp: SentimentAnalysisInput) -> SentimentAnalysisOutput:
+        if call_openai_for_sentiment is not None:
+            try:
+                data = call_openai_for_sentiment(inp.text, context=inp.context)
+                sentiment = str(data.get("sentiment") or _UNCLASSIFIED_SENTIMENT).lower()
+                if sentiment not in ("positive", "negative", "neutral"):
+                    sentiment = _UNCLASSIFIED_SENTIMENT
+                score = data.get("score")
+                confidence = data.get("confidence")
+                try:
+                    score = float(score) if score is not None else 0.5
+                    score = max(0.0, min(1.0, score))
+                except Exception:
+                    score = 0.5
+                try:
+                    confidence = float(confidence) if confidence is not None else 0.5
+                    confidence = max(0.0, min(1.0, confidence))
+                except Exception:
+                    confidence = 0.5
+                return SentimentAnalysisOutput(
+                    sentiment=sentiment,
+                    score=score,
+                    confidence=confidence,
+                    reasoning=data.get("reasoning"),
+                    tokens=data.get("tokens"),
+                )
+            except Exception as e:
+                print(f"[SentimentAnalysisTool] OpenAI call failed: {e}")
+
+        # Fallback: keyword-based heuristic
+        text_lower = inp.text.lower()
+        positive_words = {"great", "good", "excellent", "happy", "love", "awesome", "fantastic", "wonderful", "best"}
+        negative_words = {"bad", "terrible", "awful", "hate", "worst", "horrible", "poor", "disappointing", "broken"}
+        pos_hits = sum(1 for w in positive_words if w in text_lower)
+        neg_hits = sum(1 for w in negative_words if w in text_lower)
+        if pos_hits > neg_hits:
+            sentiment, score = "positive", min(0.5 + pos_hits * 0.1, 0.9)
+        elif neg_hits > pos_hits:
+            sentiment, score = "negative", min(0.5 + neg_hits * 0.1, 0.9)
+        else:
+            sentiment, score = "neutral", 0.5
+        return SentimentAnalysisOutput(
+            sentiment=sentiment,
+            score=score,
+            confidence=0.4,
+            reasoning="Classified using keyword heuristic (OpenAI not available).",
+            tokens=None,
+        )
+
+    def run(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        if isinstance(data, SentimentAnalysisInput):
+            inp = data
+        else:
+            inp = SentimentAnalysisInput(**data)
+        return self.analyze(inp).model_dump()
+
+    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self.run(data)
+
+
+sentiment_analysis_tool = SentimentAnalysisTool()
 
 # account summarizer instance
 account_summarizer = AccountSummaryTool()
