@@ -1,3 +1,4 @@
+from typing import List
 from fastapi import APIRouter, Depends, Request, HTTPException
 from src.security import get_current_user
 from src.agents.tools import SummarizeTool
@@ -6,12 +7,23 @@ from src.agents.models import CaseDetail, CaseSummary, CaseResolutionInput, Case
 from src.vectordb import query_similar, upsert_cases, similarity_to_confidence
 from src.db.agent_requests import insert_agent_request
 from src.services import license_service
+from src.services import agent_service
+from src.models.agent import AgentInfo
 import json
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 tool = SummarizeTool()
+
+
+@router.get("", response_model=List[AgentInfo])
+async def list_agents(user: str = Depends(get_current_user)):
+    """Return all agents the current user is licensed to access."""
+    try:
+        return await agent_service.get_licensed_agents(user)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/summarize", response_model=CaseSummary)
 async def summarize(request: Request, user: str = Depends(get_current_user)):
